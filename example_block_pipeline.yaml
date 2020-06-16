@@ -1,0 +1,104 @@
+version: "2.0"
+mode: sequential # block level 0
+hooks:
+  on_start:
+    exec: # shortcut for alpine with commands
+      - ./init_env.js
+  on_success:
+    exec: # single step hook
+      await: false # by default true
+      fail_fast: true # by default false
+      image: notifications:master
+      commands:
+        - ./send_success.js
+  on_failure:
+    exec: # multiple step hook
+      await: true # by default false
+      mode: parallel # can be parallel/sequential
+      steps:
+        send_notification:
+          image: notifications:master
+          commands:
+            - ./send_failure.js
+        unset_env:
+          image: env_setter:master
+          commands:
+            - ./unset_env.js
+    metadata:
+      set:
+        - result: 'Failure'
+steps:
+  build: # block level 1
+    mode: parallel
+    steps:
+      build_ui: # block level 2
+        mode: sequential
+        steps:
+          install_deps:
+            image: ui:master
+            commands:
+              - ./install_deps.js
+          build:
+            image: ui:master
+            commands:
+              - ./build.js
+
+      build_back:  # block level 2
+        mode: parallel
+        hooks:
+          on_start:
+            exec:
+              image: env_setter:master
+              commands:
+                - ./init_env.js
+        steps:
+          build_arm:
+            image: back:master
+            commands:
+              - ./build_arm.js
+          build_linux:
+            image: back:master
+            commands:
+              - ./build_linux.js
+  deploy: # block level 1
+    mode: parallel
+    hooks:
+      on_start:
+        exec:
+          image: env_setter:master
+          commands:
+            - ./init_env.js
+      on_finish:
+        metadata:
+          set:
+            result: 'Deployed'
+    steps:
+      deploy_ui: # block level 2
+        mode: sequential
+        steps:
+          init:
+            image: ui:master
+            commands:
+              - ./init.js
+          deploy:
+            image: ui:master
+            commands:
+              - ./deploy.js
+
+      deploy_back:  # block level 2
+        mode: sequential
+        steps:
+          init:
+            image: back:master
+            commands:
+              - ./init.js
+          deploy:
+            image: back:master
+            hooks:
+              on_finish:
+                exec:
+                  image: notifications:master
+                  commands:
+                    - ./send_status.js
+            commands:
+              - ./deploy.js
